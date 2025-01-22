@@ -9,9 +9,10 @@ require(tensor)
 #' if \code{standardize = 'median'}, median and MAD are used while 
 #' if \code{standardize = 'mean'}, mean and standard deviation are used;
 #' if \code{standardize = 'none'}, no centering and standardization is performed
-#' @param tau truncation parameter, either a vector or a single value; 
+#' @param tau truncation parameter for loading estimation, either a vector or a single value; 
 #' if \code{tau = NULL}, a sequence is generated as described in Barigozzi et al (2024)
-#' @param kappa truncation parameter, see \code{tau}
+#' @param kappa truncation parameter for factor estimation, see \code{tau}
+#' @param niter an integer specifying the number of iterations
 #' @param t.ind a vector of integers containing the time indices for which factor and
 #' common component are estimated
 #' @param nfold number of folds for the cross validation procedure to select tau and kappa
@@ -31,7 +32,7 @@ require(tensor)
 #' Tail-robust factor modelling of vector and tensor time series in high dimensions
 #' @export
 rob.tfa <- function(x, r = NULL, standardize = c('median', 'mean', 'none'),
-                    tau = NULL, kappa = NULL,
+                    tau = NULL, kappa = NULL, niter = 2,
                     t.ind = NULL, nfold = 3){
   
   # main function
@@ -102,7 +103,7 @@ rob.tfa <- function(x, r = NULL, standardize = c('median', 'mean', 'none'),
     }
   }
   
-  out <- rob.tnsr.loading.est(sx, tau, r)
+  out <- rob.tnsr.loading.est(sx, tau, r, niter)
   eigvec <- out$final$eigvec
   
   if(is.null(kappa.seq) || length(kappa.seq) > 1) kappa <- tau
@@ -133,13 +134,19 @@ rob.tfa <- function(x, r = NULL, standardize = c('median', 'mean', 'none'),
 #' @param 
 #' @return a list containing:
 #' @noRd
-rob.tnsr.loading.est <- function(sx, tau, r){
+rob.tnsr.loading.est <- function(sx, tau, r, niter){
   
   K <- length(r)
   trunc.x <- trunc.tnsr(sx, tau)
   
-  first <- init.loading.est(trunc.x, r)
-  if(K > 1) final <- final.loading.est(trunc.x, r, first$eigvec) else final <- first
+  final <- first <- init.loading.est(trunc.x, r)
+  if(K > 1 && niter > 1){
+    counter <- 1
+    while(counter < niter){
+      final <- iter.loading.est(trunc.x, r, final$eigvec)
+      counter <- counter + 1
+    }
+  }
   
   out <- list(first = first, final = final)
   return(out)
@@ -171,11 +178,11 @@ init.loading.est <- function(x, r){
   
 }
 
-#' @description Produces the final estimator
+#' @description Produces the iterated estimator
 #' @param 
 #' @return a list containing:
 #' @noRd
-final.loading.est <- function(x, r, init.eigvec){
+iter.loading.est <- function(x, r, init.eigvec){
   
   K <- length(r)
   p <- dim(x)[1:K]
@@ -222,7 +229,7 @@ rob.tnsr.factor.est <- function(sx, kappa, eigvec, r, tt){
   
 }
 
-#' @description Produces the final estimator
+#' @description tensor truncation
 #' @noRd
 trunc.tnsr <- function(sx, tau){
   
@@ -236,9 +243,10 @@ trunc.tnsr <- function(sx, tau){
 #' @param r factor numbers, known
 #' @param tau.seq a sequence of truncation parameters
 #' @param nfold number of folds
+#' @param niter number of iterations
 #' @return err
 #' @noRd
-tnsr.cv.tau <- function(sx, r, tau.seq, nfold = 3){
+tnsr.cv.tau <- function(sx, r, tau.seq, nfold = 3, niter = 2){
   
   np <- dim(sx)
   K <- length(np) - 1
@@ -257,14 +265,14 @@ tnsr.cv.tau <- function(sx, r, tau.seq, nfold = 3){
     ind1 <- setdiff(1:n, ind0)
     
     sx0 <- array(as.vector(vecsx[, ind0, drop = FALSE]), dim = c(p, length(ind0)))
-    u0 <- rob.tnsr.loading.est(sx0, tau = max(tau.seq) * 1.1, r)$final$eigvec
+    u0 <- rob.tnsr.loading.est(sx0, tau = max(tau.seq) * 1.1, r, niter)$final$eigvec
     ls0.list <- c()
     for(kk in 1:K) ls0.list <- c(ls0.list, list(u0[[kk]] %*% t(u0[[kk]])))
     
     sx1 <- array(as.vector(vecsx[, ind1, drop = FALSE]), dim = c(p, length(ind1)))
     
     for(ii in 1:length(tau.seq)){
-      out <- rob.tnsr.loading.est(sx1, tau = tau.seq[ii], r)
+      out <- rob.tnsr.loading.est(sx1, tau = tau.seq[ii], r, niter)
       for(kk in 1:K){
         cv.err[ii, 1, kk, mm] <- 1 - sum(diag(out$first$eigvec[[kk]] %*% t(out$first$eigvec[[kk]]) %*% ls0.list[[kk]])) / r[kk]
         cv.err[ii, 2, kk, mm] <- 1 - sum(diag(out$final$eigvec[[kk]] %*% t(out$final$eigvec[[kk]]) %*% ls0.list[[kk]])) / r[kk]
