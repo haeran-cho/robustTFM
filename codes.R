@@ -140,9 +140,9 @@ rob.tnsr.loading.est <- function(sx, tau, r, niter){
   trunc.x <- trunc.tnsr(sx, tau)
   
   final <- first <- init.loading.est(trunc.x, r)
-  if(K > 1 && niter > 1){
+  if(K > 1 && niter >= 1){
     counter <- 1
-    while(counter < niter){
+    while(counter <= niter){
       final <- iter.loading.est(trunc.x, r, final$eigvec)
       counter <- counter + 1
     }
@@ -246,7 +246,7 @@ trunc.tnsr <- function(sx, tau){
 #' @param niter number of iterations
 #' @return err
 #' @noRd
-tnsr.cv.tau <- function(sx, r, tau.seq, nfold = 3, niter = 2){
+tnsr.cv.tau <- function(sx, r, tau.seq, nfold = 3, niter = 1){
   
   np <- dim(sx)
   K <- length(np) - 1
