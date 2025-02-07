@@ -3,6 +3,7 @@
 install.packages("readr")
 install.packages("pracma")
 devtools::install_github("cykbennie/fbi")
+
 library(fbi)
 
 source('codes.R')
@@ -85,26 +86,25 @@ data <- data[data$date > "1959-12" & data$date < "2024-01", ]
 data <- data[, !is.na(data[1, ])]
 data <- data[, apply(data, 2, function(z){ sum(is.na(z)) }) == 0]
 
-x <- t(as.matrix(data[, - 1]))
-x <- x[!(rownames(x) %in% c("NONBORRES", "M1SL")), ]
-dim(x) # n = 768, p = 109
+x0 <- t(as.matrix(data[, - 1]))
+x <- t(apply(x0, 1, diff))
+
+dim(x) # n = 768, p = 111
 
 ## rolling window-based forecasting exercise
 
 library(HDRFA)
 
-r <- c(5, 6)[1]
+r <- c(3, 4, 5)[3]
 m <- 12 * 10
 
 p <- dim(x)[1]; n <- dim(x)[2]
 
-err <- array(0, dim = c(2, n, 2, 3, 24))
+err <- array(0, dim = c(p, n, 2, 3, 24))
 dimnames(err)[[3]] <- c('in-sample', 'forecast')
-dimnames(err)[[4]] <- c('trunc', 'no-trunc', 'HDRFA')
+dimnames(err)[[4]] <- c('trunc', 'pca', 'HDRFA')
 dimnames(err)[[5]] <- 1:24
 trunc.param.seq <- rep(0, n)
-
-ind <- which(rownames(x) %in% c("INDPRO", "CPIAUCSL"))
 
 for(tt in m:(n - 24)){
 
@@ -160,28 +160,42 @@ for(tt in m:(n - 24)){
       
       if(ll == 1){
         fc <- (proj %*% trunc.tnsr(z, trunc.param.seq[tt])) * sc + center
-        err[, tt, 1, ll, hh] <- fc[ind] - x[ind, tt + h, drop = FALSE]
+        err[, tt, 1, ll, hh] <- fc - x[, tt + h, drop = FALSE]
       } else{
         fc <- (proj %*% z) * sc + center
-        err[, tt, 1, ll, hh] <- fc[ind] - x[ind, tt + h, drop = FALSE]
+        err[, tt, 1, ll, hh] <- fc - x[, tt + h, drop = FALSE]
       } 
       
       fc <- proj %*% t(Gamma_x) %*% t(t(loading) /eigval) %*% ff
       fc <- fc * sc + center
-      err[, tt, 2, ll, hh] <- fc[ind] - x[ind, tt + h, drop = FALSE]
+      err[, tt, 2, ll, hh] <- fc - x[, tt + h, drop = FALSE]
     }
   }
 }
 
 ls <- list(err = err, trunc.param.seq = trunc.param.seq)
-save(ls, file = paste("~/downloads/fredmd_forecasting_r", r, ".RData", sep = ""))
 
-## results / run fluctation_test
+## overall
+
+loss1 <- apply(abs(ls$err[,-c(1:m, n - 1:24 + 1), 2, 1, 1:h]), 1, mean)
+loss2 <- apply(abs(ls$err[,-c(1:m, n - 1:24 + 1), 2, 2, 1:h]), 1, mean)
+
+table(loss1 > loss2)
+
+nm <- paste("Trunc < PCA: ", round(100 * mean(loss1 < loss2), 2), ' %', sep = '')
+
+par(mar = c(4, 2.5, 2.5, .5))
+plot(-(loss2 - loss1) / apply(x, 1, sd), xaxt = 'n', xlab = '', ylab = '', main = nm)
+abline(h = 0, col = 2)
+axis(1, at = 1:p, labels = substr(dimnames(x)[[1]][ind], 1, 5), las = 2, cex.axis = .7)
+
+
+## indpro, cpi / run fluctation_test
 
 jj <- 2 # 1: in-sample estimation 2: forecasting error
 h <- 24 # number of lags to examine
-kk <- 2 #  1: INDPRO 2: CPIAUCSL
-nm <- c("INDPRO", "CPIAUCSL")[kk]
+nm <- c("INDPRO", "CPIAUCSL")[1]
+kk <- which(rownames(x)[ind] == nm)
 
 ll <- 1 # trunc
 mm <- 2 # pca
